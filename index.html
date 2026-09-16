@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Latency / Jitter Measurement</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:'Segoe UI',system-ui,sans-serif;background:#1a1a2e;color:#e0e0e0;overflow:hidden}
+#app{display:flex;flex-direction:column;height:100vh}
+/* Header */
+.header{display:flex;align-items:center;gap:12px;padding:6px 14px;background:#16213e;border-bottom:1px solid #0f3460;flex-shrink:0}
+.header h1{font-size:15px;color:#e94560;white-space:nowrap}
+.header .file-row{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.header .file-group{display:flex;align-items:center;gap:4px;font-size:11px}
+.header .file-group label{color:#a0a0b0;white-space:nowrap;font-weight:600;width:24px}
+.header .file-group input[type=file]{display:none}
+.header .file-group .btn-sm{padding:3px 10px;font-size:11px;background:#0f3460;border:1px solid #e94560;color:#e0e0e0;border-radius:3px;cursor:pointer}
+.header .file-group .btn-sm:hover{background:#1a4a80}
+.header .file-group .fname{color:#00a8ff;font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.header .btn-go{padding:5px 20px;background:#e94560;border:none;color:#fff;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600}
+.header .btn-go:hover{background:#c73a52}
+.header .btn-go:disabled{background:#555;cursor:not-allowed}
+.header .info{font-size:10px;color:#a0a0b0;white-space:nowrap}
+.header .spinner{display:none;width:14px;height:14px;border:2px solid #e94560;border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading .spinner{display:inline-block}
+/* Controls bar */
+.controls{display:flex;align-items:center;gap:12px;padding:5px 14px;background:#16213e;border-bottom:1px solid #0f3460;flex-shrink:0;flex-wrap:wrap}
+.ctrl{display:flex;align-items:center;gap:4px}
+.ctrl label{font-size:10px;color:#a0a0b0;min-width:55px}
+.ctrl input[type=range]{width:80px;accent-color:#e94560}
+.ctrl input[type=number]{width:52px;background:#0f3460;border:1px solid #e94560;color:#e0e0e0;padding:2px 4px;border-radius:3px;font-size:10px}
+.ctrl .val{font-size:10px;color:#e94560;min-width:32px;text-align:right}
+.ctrl input[type=checkbox]{accent-color:#e94560}
+.ctrl .cb-label{font-size:11px;color:#a0a0b0}
+.btn-export{padding:4px 12px;background:#0f3460;border:1px solid #00a8ff;color:#00a8ff;border-radius:3px;cursor:pointer;font-size:10px}
+.btn-export:hover{background:#1a4a80}
+/* Generator panel */
+.gen-toggle{padding:4px 14px;background:#16213e;cursor:pointer;color:#a0a0b0;font-size:11px;border-bottom:1px solid #0f3460;display:flex;align-items:center;gap:6px;flex-shrink:0}
+.gen-toggle:hover{color:#e94560}
+.gen-toggle .arrow{transition:transform .2s;font-size:10px}
+.gen-toggle.open .arrow{transform:rotate(90deg)}
+.gen-panel{display:none;padding:5px 14px;background:#16213e;border-bottom:1px solid #0f3460;flex-shrink:0;flex-wrap:wrap;gap:6px}
+.gen-panel.open{display:flex;align-items:center;flex-wrap:wrap}
+.gen-panel .ctrl label{min-width:38px}
+.gen-panel .ctrl input[type=range]{width:65px}
+.gen-panel .btn-go{font-size:11px;padding:4px 14px}
+.gen-info{font-size:10px;color:#a0a0b0;margin-left:8px}
+/* Main content */
+.main{display:flex;flex:1;min-height:0;overflow:hidden}
+.left-panel{width:260px;flex-shrink:0;padding:8px;display:flex;flex-direction:column;gap:6px;overflow-y:auto}
+.right-panel{flex:1;display:flex;flex-direction:column;gap:4px;padding:6px;min-width:0}
+.stats-box{background:#0f3460;border-radius:4px;padding:8px;font-family:'Courier New',monospace;font-size:11px;flex-shrink:0}
+.stats-box h3{color:#e94560;font-size:12px;margin-bottom:4px}
+.stats-grid{display:grid;grid-template-columns:auto auto;gap:1px 8px}
+.stats-grid .l{color:#a0a0b0}
+.stats-grid .v{color:#e0e0e0;text-align:right}
+.stats-grid .v.hi{color:#e94560;font-weight:bold}
+.status-box{background:#0f3460;border-radius:4px;padding:6px 8px;font-size:10px;color:#a0a0b0;flex-shrink:0}
+.status-box .ok{color:#00ff88}
+.status-box .err{color:#e94560}
+.chart-row{display:flex;flex:1;min-height:0;gap:4px}
+.chart-box{flex:1;background:#0f3460;border-radius:4px;padding:4px;position:relative;min-width:0;display:flex;flex-direction:column}
+.chart-box canvas{flex:1;min-height:0}
+.table-wrap{background:#0f3460;border-radius:4px;overflow:hidden;flex-shrink:0;max-height:140px;overflow-y:auto}
+.table-wrap table{width:100%;font-size:10px;border-collapse:collapse}
+.table-wrap th{color:#a0a0b0;text-align:right;padding:2px 8px;border-bottom:1px solid #1a1a3e;position:sticky;top:0;background:#0f3460}
+.table-wrap td{text-align:right;padding:1px 8px;color:#e0e0e0;white-space:nowrap}
+.error-banner{background:#3a1010;color:#e94560;padding:6px 14px;font-size:11px;flex-shrink:0;display:none}
+.error-banner.show{display:block}
+.overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:100;flex-direction:column}
+.overlay.hidden{display:none}
+.overlay .msg{font-size:16px;color:#e0e0e0;margin-bottom:12px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header" id="header">
+    <h1>Latency / Jitter</h1>
+    <div class="file-row">
+      <div class="file-group">
+        <label>Ref</label>
+        <button class="btn-sm" onclick="document.getElementById('refFile').click()">Browse</button>
+        <input type="file" id="refFile" accept=".wav" onchange="onFileSelect('ref',this)">
+        <span class="fname" id="refName">---</span>
+      </div>
+      <div class="file-group">
+        <label>Rec</label>
+        <button class="btn-sm" onclick="document.getElementById('recFile').click()">Browse</button>
+        <input type="file" id="recFile" accept=".wav" onchange="onFileSelect('rec',this)">
+        <span class="fname" id="recName">---</span>
+      </div>
+    </div>
+    <span class="info" id="fileInfo"></span>
+    <button class="btn-go" id="uploadBtn" onclick="doUpload()">Load Files</button>
+    <div class="spinner" id="hdrSpinner"></div>
+  </div>
+
+  <!-- Generator toggle + panel -->
+  <div class="gen-toggle" id="genToggle" onclick="toggleGen()">
+    <span class="arrow">&#9654;</span> Test Signal Generator
+  </div>
+  <div class="gen-panel" id="genPanel">
+    <div class="ctrl"><label>SR (Hz)</label><input type="number" id="genSR" value="16000" min="8000" max="192000" step="100" style="width:62px"></div>
+    <div class="ctrl"><label>Bits</label><select id="genBits" style="background:#0f3460;border:1px solid #e94560;color:#e0e0e0;padding:2px 4px;border-radius:3px;font-size:10px"><option value="16">16</option><option value="32">32</option></select></div>
+    <div class="ctrl"><label>Chirp(ms)</label><input type="number" id="genChirp" value="200" min="10" max="5000" step="10" style="width:52px"></div>
+    <div class="ctrl"><label>Gap(ms)</label><input type="number" id="genGap" value="2000" min="0" max="60000" step="100" style="width:55px"></div>
+    <div class="ctrl"><label>Repeat</label><input type="number" id="genRepeat" value="10" min="1" max="1000" step="1" style="width:45px"></div>
+    <div class="ctrl"><label>F0 (Hz)</label><input type="range" id="genF0" min="100" max="5000" value="500" step="10" oninput="elem('genF0v').textContent=this.value" style="width:70px"><span class="val" id="genF0v">500</span></div>
+    <div class="ctrl"><label>F1 (Hz)</label><input type="range" id="genF1" min="1000" max="22000" value="8000" step="10" oninput="elem('genF1v').textContent=this.value" style="width:70px"><span class="val" id="genF1v">8000</span></div>
+    <div class="ctrl"><label>Amp</label><input type="range" id="genAmp" min="5" max="100" value="80" step="5" oninput="elem('genAmpv').textContent=(this.value/100).toFixed(2)" style="width:60px"><span class="val" id="genAmpv">0.80</span></div>
+    <button class="btn-go" onclick="doGenerate()" style="font-size:11px;padding:4px 14px">Generate</button>
+    <span class="gen-info" id="genInfo"></span>
+  </div>
+
+  <div class="controls" id="controls">
+    <div class="ctrl">
+      <label>Threshold</label>
+      <input type="range" id="threshold" min="1" max="95" value="15" step="1" oninput="trOnInput()">
+      <span class="val" id="thresholdVal">0.15</span>
+    </div>
+    <div class="ctrl">
+      <label>Min Gap (s)</label>
+      <input type="range" id="minGap" min="5" max="300" value="50" step="1" oninput="trOnInput()">
+      <span class="val" id="minGapVal">0.50</span>
+    </div>
+    <div class="ctrl">
+      <label>Margin</label>
+      <input type="range" id="margin" min="50" max="10000" value="2000" step="10" oninput="trOnInput()">
+      <span class="val" id="marginVal">2000</span>
+    </div>
+    <div class="ctrl">
+      <label>Chirp (ms)</label>
+      <input type="number" id="chirpMs" value="100" min="0" max="2000" step="1" style="width:55px">
+    </div>
+    <div class="ctrl">
+      <input type="checkbox" id="useBP" onchange="bpOnChange()">
+      <span class="cb-label">BP</span>
+    </div>
+    <div class="ctrl">
+      <input type="range" id="bpLow" min="100" max="2000" value="500" step="10" disabled oninput="trOnInput()">
+      <input type="range" id="bpHigh" min="3000" max="20000" value="9000" step="10" disabled oninput="trOnInput()">
+    </div>
+    <button class="btn-go" id="analyzeBtn" onclick="doAnalyze()" disabled style="font-size:11px;padding:4px 18px">Analyze</button>
+    <button class="btn-export" id="exportBtn" onclick="doExport()" disabled>Export CSV</button>
+  </div>
+  <div class="error-banner" id="errorBanner"></div>
+  <div class="main">
+    <div class="left-panel">
+      <div class="stats-box" id="statsBox"><h3>Statistics</h3><div class="stats-grid" id="statsGrid"></div></div>
+      <div class="status-box" id="statusBox">No files loaded.</div>
+    </div>
+    <div class="right-panel">
+      <div class="chart-row"><div class="chart-box"><canvas id="crossCorrChart"></canvas></div></div>
+      <div class="chart-row"><div class="chart-box"><canvas id="delayChart"></canvas></div></div>
+      <div class="table-wrap" id="delayTable"></div>
+    </div>
+  </div>
+</div>
+<div class="overlay hidden" id="overlay"><div class="msg">Loading...</div><div class="spinner" style="display:inline-block;width:24px;height:24px;border-width:3px"></div></div>
+
+<script>
+let ccChart=null,delayChart=null,filesReady=false;
+
+function trOnInput(){
+  elem('thresholdVal').textContent=(elem('threshold').value/100).toFixed(2);
+  elem('minGapVal').textContent=(elem('minGap').value/100).toFixed(2);
+  elem('marginVal').textContent=elem('margin').value;
+}
+function bpOnChange(){var on=elem('useBP').checked;elem('bpLow').disabled=!on;elem('bpHigh').disabled=!on;}
+function elem(id){return document.getElementById(id)}
+function val(id){return parseFloat(elem(id).value)}
+function showError(msg){var b=elem('errorBanner');b.textContent=msg;b.classList.add('show');setTimeout(()=>b.classList.remove('show'),5000)}
+function showOverlay(show){elem('overlay').classList.toggle('hidden',!show)}
+
+function toggleGen(){
+  var p=elem('genPanel'),t=elem('genToggle');
+  p.classList.toggle('open');t.classList.toggle('open');
+}
+
+// ── Generator ──
+async function loadGenConfig(){
+  try{var r=await fetch('/api/generate-config');var d=await r.json();
+    elem('genSR').value=d.sampleRate;elem('genBits').value=d.bitDepth;
+    elem('genChirp').value=d.chirpMs;elem('genGap').value=d.gapMs;
+    elem('genRepeat').value=d.repeatCount;elem('genF0').value=d.freqStart;
+    elem('genF1').value=d.freqEnd;elem('genAmp').value=Math.round(d.amplitude*100);
+    elem('genF0v').textContent=d.freqStart;elem('genF1v').textContent=d.freqEnd;
+    elem('genAmpv').textContent=d.amplitude.toFixed(2);
+  }catch(e){}
+}
+
+async function doGenerate(){
+  var cfg={sampleRate:parseInt(elem('genSR').value),bitDepth:parseInt(elem('genBits').value),
+    chirpMs:parseFloat(elem('genChirp').value),gapMs:parseFloat(elem('genGap').value),
+    repeatCount:parseInt(elem('genRepeat').value),freqStart:parseFloat(elem('genF0').value),
+    freqEnd:parseFloat(elem('genF1').value),amplitude:elem('genAmp').value/100};
+  showOverlay(true);elem('genInfo').textContent='Generating...';
+  try{var r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+    if(!r.ok){var e=await r.text();showError(e);showOverlay(false);elem('genInfo').textContent='';return}
+    var blob=await r.blob();
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');a.href=url;a.download='chirp_test.wav';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+    elem('genInfo').textContent='Downloaded.';
+  }catch(e){showError('Generate failed: '+e.message)}
+  showOverlay(false);
+}
+
+// ── File selection ──
+function onFileSelect(which,input){var f=input.files[0];if(f)elem(which+'Name').textContent=f.name;}
+async function doUpload(){
+  var rf=elem('refFile').files[0],rc=elem('recFile').files[0];
+  if(!rf||!rc){showError('Please select both Ref and Rec WAV files.');return}
+  var fd=new FormData();fd.append('ref',rf);fd.append('rec',rc);
+  showOverlay(true);
+  try{var r=await fetch('/api/upload',{method:'POST',body:fd});var d=await r.json();
+    if(!r.ok){showError(d.details?d.details.join('; '):d.error);showOverlay(false);return}
+    filesReady=true;
+    elem('fileInfo').textContent=d.sampleRate+' Hz, '+d.durationSec.toFixed(1)+' s, '+d.refSamples+' smp';
+    elem('statusBox').innerHTML='<span class="ok">Files loaded:</span> '+d.refName+' / '+d.recName;
+    elem('analyzeBtn').disabled=false;doAnalyze();
+  }catch(e){showError('Upload failed: '+e.message)}
+  showOverlay(false);
+}
+
+// ── Analysis ──
+async function doAnalyze(){
+  if(!filesReady){var r=await fetch('/api/init');var d=await r.json();
+    if(!d.hasFiles){showError('Please select and load WAV files first.');return}
+    filesReady=true;elem('analyzeBtn').disabled=false;}
+  var p=new URLSearchParams({threshold:val('threshold')/100,minGapSec:val('minGap')/100,
+    margin:parseInt(val('margin')),useBP:elem('useBP').checked?'1':'0',
+    bpLow:parseInt(val('bpLow')),bpHigh:parseInt(val('bpHigh')),chirpMs:val('chirpMs')});
+  showOverlay(true);
+  try{var r=await fetch('/api/analyze?'+p);var d=await r.json();
+    if(!r.ok){showError(d.error);showOverlay(false);return}
+    render(d);elem('exportBtn').disabled=false;
+  }catch(e){showError('Analysis failed: '+e.message)}
+  showOverlay(false);
+}
+
+function doExport(){window.open('/api/export','_blank')}
+
+function render(data){
+  var s=data.stats,h='<h3>Statistics</h3><div class="stats-grid">';
+  if(s.count>0){h+='<span class="l">N</span><span class="v">'+s.count+'</span>';
+    h+='<span class="l">Max</span><span class="v">'+s.maxSamp+' smp / '+s.maxMs.toFixed(3)+' ms</span>';
+    h+='<span class="l">Min</span><span class="v">'+s.minSamp+' smp / '+s.minMs.toFixed(3)+' ms</span>';
+    h+='<span class="l">Mean</span><span class="v hi">'+s.meanSamp.toFixed(1)+' smp / '+s.meanMs.toFixed(3)+' ms</span>';
+    h+='<span class="l">Std (jit)</span><span class="v hi">'+s.stdSamp.toFixed(2)+' smp / '+s.stdMs.toFixed(3)+' ms</span>';
+    h+='<span class="l">P2P (jit)</span><span class="v hi">'+s.p2pSamp+' smp / '+s.p2pMs.toFixed(3)+' ms</span>';
+  }else{h+='<span colspan="2" class="err">No peaks detected</span>'}h+='</div>';
+  elem('statsGrid').innerHTML=h;
+  var tb='<table><tr><th>#</th><th>Ref Pos</th><th>Rec Pos</th><th>Delay(smp)</th><th>Delay(ms)</th><th>Corr</th></tr>';
+  for(var i=0;i<data.delaysSamples.length;i++)tb+='<tr><td>'+(i+1)+'</td><td>'+data.refPositions[i]+'</td><td>'+data.recPositions[i]+'</td><td>'+data.delaysSamples[i]+'</td><td>'+data.delaysMs[i].toFixed(3)+'</td><td>'+data.corrVals[i].toFixed(3)+'</td></tr>';
+  tb+='</table>';elem('delayTable').innerHTML=tb;
+  var ccData=data.globalCC||[];if(ccChart)ccChart.destroy();
+  var ctx1=elem('crossCorrChart').getContext('2d');
+  var ds=Math.max(1,Math.floor(data.sampleRate*data.durationSec/ccData.length));
+  var pkd=new Array(ccData.length).fill(null);
+  if(data.peakIndices)data.peakIndices.forEach(function(p){var i=Math.floor(p/ds);if(i<ccData.length)pkd[i]=ccData[i]});
+  ccChart=new Chart(ctx1,{type:'line',
+    data:{labels:ccData.map((_,i)=>(i*ds/data.sampleRate*1000).toFixed(0)),datasets:[
+      {label:'|Cross-Correlation|',data:ccData,borderColor:'#e94560',borderWidth:1,pointRadius:0,tension:0},
+      {label:'Detected Peaks',data:pkd,backgroundColor:'#00ff88',borderColor:'#00ff88',pointRadius:3,pointStyle:'rectRot',showLine:false}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      scales:{x:{title:{display:true,text:'Time (ms)',color:'#a0a0b0'},ticks:{color:'#a0a0b0',maxTicksLimit:8}},y:{title:{display:true,text:'|Corr|',color:'#a0a0b0'},ticks:{color:'#a0a0b0'},min:0}},
+      plugins:{legend:{labels:{color:'#a0a0b0',font:{size:9}}},title:{display:true,text:'Global Cross-Correlation (on Ref)',color:'#e0e0e0',font:{size:10}}}}});
+  if(delayChart)delayChart.destroy();var ctx2=elem('delayChart').getContext('2d');
+  delayChart=new Chart(ctx2,{type:'line',
+    data:{labels:data.delaysSamples.map((_,i)=>i+1),datasets:[
+      {label:'Delay (samples)',data:data.delaysSamples,borderColor:'#00a8ff',backgroundColor:'#00a8ff30',pointRadius:4,pointBackgroundColor:'#00a8ff',tension:0}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      scales:{x:{title:{display:true,text:'Playback #',color:'#a0a0b0'},ticks:{color:'#a0a0b0',stepSize:1}},y:{title:{display:true,text:'Delay (samples)',color:'#a0a0b0'},ticks:{color:'#a0a0b0'}}},
+      plugins:{legend:{labels:{color:'#a0a0b0',font:{size:9}}},title:{display:true,text:'Latency per Playback',color:'#e0e0e0',font:{size:10}},
+        tooltip:{callbacks:{label:function(c){return c.raw+' samples ('+data.delaysMs[c.dataIndex].toFixed(3)+' ms)'}}}}}});
+}
+
+async function init(){
+  loadGenConfig();
+  try{var r=await fetch('/api/init');var d=await r.json();
+    var dp=d.defaultParams;
+    elem('threshold').value=Math.round(dp.threshold*100);elem('minGap').value=Math.round(dp.minGapSec*100);
+    elem('margin').value=dp.margin;elem('chirpMs').value=dp.chirpMs;trOnInput();
+    if(d.hasFiles){filesReady=true;elem('refName').textContent=d.refName||'---';
+      elem('recName').textContent=d.recName||'---';
+      elem('fileInfo').textContent=d.sampleRate+' Hz, '+d.durationSec.toFixed(1)+' s, '+d.refSamples+' smp';
+      elem('statusBox').innerHTML='<span class="ok">Preloaded:</span> '+d.refName+' / '+d.recName;
+      elem('analyzeBtn').disabled=false;doAnalyze();
+    }else{elem('statusBox').innerHTML='Select Ref and Rec WAV files, then click <b>Load Files</b>.<br>Or expand <b>Test Signal Generator</b> to create a reference chirp.';}
+  }catch(e){console.error('Init error:',e)}
+}
+init();
+</script>
+</body>
+</html>
